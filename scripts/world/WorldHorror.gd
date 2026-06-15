@@ -2,80 +2,72 @@ extends Node3D
 
 # ============================================================
 # WorldHorror.gd — Этап 2 (Хоррор)
-# Тот же мир но: без деревни, без замка, жители исчезли,
-# Лесной Дух активен, минимальный красный тинт
+# Тот же мир: без деревни, без замка, Лесной Дух активен
 # ============================================================
 
-add_to_group("world")
-
 var _player: Node3D = null
+var _player_stats: Node = null
 var _hud: Node = null
 var _save_manager: Node
 var _audio: Node
 var _fourth_wall: Node
-var _device_info: Node
+var _autosave_timer := 0.0
 
 func _ready() -> void:
+	# FIX: add_to_group должен вызываться в _ready()
+	add_to_group("world")
+
 	_save_manager = get_node("/root/SaveManager")
 	_audio        = get_node("/root/AudioLayerManager")
 	_fourth_wall  = get_node("/root/FourthWall")
-	_device_info  = get_node("/root/DeviceInfo")
 
-	# Загружаем HUD
+	# HUD
 	var hud_scene := preload("res://scenes/ui/HUD.tscn")
 	_hud = hud_scene.instantiate()
 	add_child(_hud)
 
-	# Загружаем игрока
+	# Игрок
 	var player_scene := preload("res://scenes/player/Player.tscn")
 	_player = player_scene.instantiate()
 	add_child(_player)
 
-	# Восстанавливаем позицию
 	var px: float = _save_manager.get_value("player_pos_x", 0.0)
-	var py: float = _save_manager.get_value("player_pos_y", 0.5)
+	var py: float = _save_manager.get_value("player_pos_y", 1.0)
 	var pz: float = _save_manager.get_value("player_pos_z", 0.0)
 	_player.global_position = Vector3(px, py, pz)
 
-	# Соединяем сигналы
-	if _player.has_signal("stats_changed"):
-		_player.stats_changed.connect(_on_player_stats_changed)
-	if _player.has_signal("died"):
-		_player.died.connect(_on_player_died)
+	# FIX: сигналы к PlayerStats (дочерний узел)
+	_player_stats = _player.get_node_or_null("PlayerStats")
+	if _player_stats:
+		if _player_stats.has_signal("stats_changed"):
+			_player_stats.stats_changed.connect(_on_player_stats_changed)
+		if _player_stats.has_signal("died"):
+			_player_stats.died.connect(_on_player_died)
 
-	# Хоррор-музыка
 	_audio.start_horror()
-
-	# Активируем 4-ю стену
 	_fourth_wall.activate()
-
-	# Применяем хоррор-эффекты окружения
 	_apply_horror_environment()
-
-	# Проверяем уведомление
 	get_node("/root/NotificationManager").check_pending_notification()
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if _player:
-		_auto_save_check()
+		_auto_save_check(delta)
 
 # ============================================================
 # Хоррор-окружение
 # ============================================================
 
 func _apply_horror_environment() -> void:
-	# Туман
-	var env := WorldEnvironment.new()
+	var env_node := WorldEnvironment.new()
 	var environment := Environment.new()
 	environment.fog_enabled = true
 	environment.fog_light_color = Color(0.05, 0.0, 0.0)
 	environment.fog_density = 0.03
 	environment.background_mode = Environment.BG_COLOR
 	environment.background_color = Color(0.05, 0.0, 0.0)
-	env.environment = environment
-	add_child(env)
+	env_node.environment = environment
+	add_child(env_node)
 
-	# Направленный свет (луна, красноватый)
 	var light := DirectionalLight3D.new()
 	light.light_color = Color(0.6, 0.3, 0.3)
 	light.light_energy = 0.3
@@ -87,7 +79,6 @@ func _apply_horror_environment() -> void:
 # ============================================================
 
 func spawn_final_door() -> void:
-	# Дверь появляется в 50м от игрока в случайном направлении
 	if not _player:
 		return
 	var angle := randf_range(0.0, TAU)
@@ -100,10 +91,8 @@ func spawn_final_door() -> void:
 # Автосохранение
 # ============================================================
 
-var _autosave_timer := 0.0
-
-func _auto_save_check() -> void:
-	_autosave_timer += get_process_delta_time()
+func _auto_save_check(delta: float) -> void:
+	_autosave_timer += delta
 	if _autosave_timer >= 60.0:
 		_autosave_timer = 0.0
 		if _player:
@@ -111,6 +100,8 @@ func _auto_save_check() -> void:
 			_save_manager.set_value("player_pos_x", pos.x)
 			_save_manager.set_value("player_pos_y", pos.y)
 			_save_manager.set_value("player_pos_z", pos.z)
+		if _player_stats:
+			_player_stats.save_to_save()
 		_save_manager.save_game()
 
 # ============================================================

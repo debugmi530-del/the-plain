@@ -2,10 +2,8 @@ extends CanvasLayer
 
 # ============================================================
 # HUD.gd — интерфейс во время игры
-# HP-бар, выносливость, мини-карта, инвентарь, журнал 4-й стены
+# HP-бар, выносливость, XP, журнал 4-й стены, меню паузы
 # ============================================================
-
-add_to_group("hud")
 
 @onready var _hp_bar: ProgressBar       = $HpBar
 @onready var _stamina_bar: ProgressBar  = $StaminaBar
@@ -19,6 +17,9 @@ var _fourth_wall: Node
 var _is_paused := false
 
 func _ready() -> void:
+	# FIX: add_to_group должен вызываться в _ready(), не на уровне класса
+	add_to_group("hud")
+
 	_fourth_wall = get_node("/root/FourthWall")
 	_fourth_wall.glitch_triggered.connect(_on_glitch)
 	_fourth_wall.activate()
@@ -31,13 +32,20 @@ func _ready() -> void:
 # ============================================================
 
 func update_hp(current: float, max_hp: float) -> void:
+	# FIX: guard против деления на ноль
+	if max_hp <= 0.0:
+		return
 	_hp_bar.value = (current / max_hp) * 100.0
 
 func update_stamina(current: float, max_st: float) -> void:
+	if max_st <= 0.0:
+		return
 	_stamina_bar.value = (current / max_st) * 100.0
 
 func update_xp(xp: int, level: int) -> void:
 	var max_xp := 100 * (level * level)
+	if max_xp <= 0:
+		return
 	_xp_bar.value = (float(xp) / float(max_xp)) * 100.0
 	_level_label.text = "ур. %d" % level
 
@@ -64,6 +72,7 @@ func _on_btn_main_menu_pressed() -> void:
 
 func _on_glitch(text: String) -> void:
 	_glitch_label.text = text
+	_glitch_label.modulate.a = 1.0
 	_glitch_label.visible = true
 	var tween := create_tween()
 	tween.tween_property(_glitch_label, "modulate:a", 0.0, randf_range(2.0, 4.0))

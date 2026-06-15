@@ -57,6 +57,7 @@ text = ""
 horizontal_alignment = 1
 modulate = Color(1, 0.2, 0.2, 0)
 visible = false
+theme_override_font_sizes/font_size = 22
 
 [node name="CenterText" type="Label" parent="."]
 anchors_preset = 8
@@ -72,7 +73,7 @@ text = ""
 horizontal_alignment = 1
 modulate = Color(1, 1, 1, 1)
 visible = false
-add_theme_font_size_override = 32
+theme_override_font_sizes/font_size = 32
 
 [node name="PauseOverlay" type="Control" parent="."]
 anchors_preset = 15

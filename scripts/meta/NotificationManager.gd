@@ -2,8 +2,7 @@ extends Node
 
 # ============================================================
 # NotificationManager.gd — системные уведомления Android
-# Уведомление «пора возвращаться» через 1-2 часа
-# Использует Android AlarmManager через GodotAndroidPlugin
+# Уведомление «пора возвращаться» через 1–2 часа
 # ============================================================
 
 const NOTIFICATION_CHANNEL_ID := "the_plain_channel"
@@ -13,10 +12,11 @@ const NOTIFICATION_ID := 1001
 
 var _plugin: Object = null
 var _permission_granted := false
+var _permission_requested := false
 
 func _ready() -> void:
 	_try_init_plugin()
-	_check_notification_permission()
+	_request_permission_if_needed()
 
 # ============================================================
 # Инициализация плагина
@@ -27,31 +27,39 @@ func _try_init_plugin() -> void:
 		return
 	if Engine.has_singleton("GodotNotifications"):
 		_plugin = Engine.get_singleton("GodotNotifications")
-	# Если плагин недоступен — используем fallback (glitch-текст при запуске)
 
 # ============================================================
 # Разрешения
 # ============================================================
 
-func _check_notification_permission() -> void:
+func _request_permission_if_needed() -> void:
 	if OS.get_name() != "Android":
 		_permission_granted = true
 		return
-	if OS.has_feature("android") and int(OS.get_version()) >= 33:
-		# Android 13+ требует явного разрешения
-		if OS.has_feature("PERMISSION_POST_NOTIFICATIONS"):
-			_permission_granted = true
-		else:
-			OS.request_permissions()
-	else:
-		_permission_granted = true
 
+	# FIX: убран неверный OS.has_feature("PERMISSION_POST_NOTIFICATIONS")
+	# Правильный способ: запрашиваем разрешение и ждём колбэка
+	# Android < 13 (API < 33): разрешение не нужно
+	# Android 13+: нужно явно запрашивать POST_NOTIFICATIONS
+
+	# Проверяем текущий статус через правильный метод Godot 4
+	var granted_permissions := OS.get_granted_permissions()
+	if "android.permission.POST_NOTIFICATIONS" in granted_permissions:
+		_permission_granted = true
+		return
+
+	# Запрашиваем разрешение
+	if not _permission_requested:
+		_permission_requested = true
+		OS.request_permission("android.permission.POST_NOTIFICATIONS")
+
+## Вызывается из Main или OS сигнала после ответа пользователя
 func on_permissions_result(permissions: PackedStringArray, granted: PackedByteArray) -> void:
 	for i in permissions.size():
 		if permissions[i] == "android.permission.POST_NOTIFICATIONS":
-			_permission_granted = granted[i] == 1
+			_permission_granted = (granted[i] == 1)
 			if not _permission_granted:
-				# Пользователь отклонил — ставим fallback
+				# Пользователь отклонил — ставим fallback-глитч
 				get_node("/root/FourthWall").mark_notification_fallback()
 
 # ============================================================
@@ -61,21 +69,18 @@ func on_permissions_result(permissions: PackedStringArray, granted: PackedByteAr
 func schedule_return_notification(delay_seconds: int) -> void:
 	var save_manager := get_node("/root/SaveManager")
 
-	# Запоминаем когда должно прийти уведомление
 	var target_timestamp := int(Time.get_unix_time_from_system()) + delay_seconds
 	save_manager.set_value("notification_scheduled", true)
 	save_manager.set_value("notification_timestamp", target_timestamp)
 	save_manager.save_game()
 
 	if not _permission_granted:
-		# Fallback: покажем глитч-текст при следующем запуске
 		get_node("/root/FourthWall").mark_notification_fallback()
 		return
 
 	if _plugin:
 		_send_via_plugin(delay_seconds)
-	elif OS.get_name() == "Android":
-		_send_via_java(delay_seconds)
+	# Если плагин недоступен — сохранили timestamp, проверим при следующем запуске
 
 func _send_via_plugin(delay_seconds: int) -> void:
 	if not _plugin:
@@ -85,20 +90,11 @@ func _send_via_plugin(delay_seconds: int) -> void:
 		NOTIFICATION_CHANNEL_ID,
 		NOTIFICATION_TITLE,
 		NOTIFICATION_TEXT,
-		delay_seconds * 1000  # в миллисекундах
+		delay_seconds * 1000  # миллисекунды
 	)
 
-func _send_via_java(delay_seconds: int) -> void:
-	# Через JavaClassWrapper если доступен
-	if not ClassDB.class_exists("JavaClassWrapper"):
-		return
-	# Получаем Context через AndroidRuntime
-	var context = JavaClassWrapper.get_java_class("android.os.SystemClock")
-	# Полная реализация через плагин в Этапе 5
-	push_warning("NotificationManager: Java-путь требует Godot Android Plugin (Этап 5)")
-
 # ============================================================
-# Проверка при запуске: нужно ли показать уведомление в игре
+# Проверка при запуске: нужно ли появиться финальной двери
 # ============================================================
 
 func check_pending_notification() -> void:
@@ -110,5 +106,4 @@ func check_pending_notification() -> void:
 	if now >= target:
 		save_manager.set_value("notification_scheduled", false)
 		save_manager.save_game()
-		# Спавн финальной двери
 		get_node("/root/HorrorTrigger").spawn_final_door()

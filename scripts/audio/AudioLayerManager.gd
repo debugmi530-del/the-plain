@@ -10,26 +10,25 @@ enum MusicMode { ROGUELIKE, HORROR }
 enum GameState { CALM, COMBAT }
 
 const ROGUELIKE_LAYERS := [
-	"res://assets/audio/roguelike/layer_01.ogg",  # Бас/суббас
-	"res://assets/audio/roguelike/layer_02.ogg",  # Перкуссия
-	"res://assets/audio/roguelike/layer_03.ogg",  # Мелодия главная
-	"res://assets/audio/roguelike/layer_04.ogg",  # Мелодия вторая
-	"res://assets/audio/roguelike/layer_05.ogg",  # Атмосфера
-	"res://assets/audio/roguelike/layer_06.ogg",  # Высокие частоты
-	"res://assets/audio/roguelike/layer_07.ogg",  # Средние частоты
-	"res://assets/audio/roguelike/layer_08.ogg",  # Случайный акцент
+	"res://assets/audio/roguelike/layer_01.ogg",
+	"res://assets/audio/roguelike/layer_02.ogg",
+	"res://assets/audio/roguelike/layer_03.ogg",
+	"res://assets/audio/roguelike/layer_04.ogg",
+	"res://assets/audio/roguelike/layer_05.ogg",
+	"res://assets/audio/roguelike/layer_06.ogg",
+	"res://assets/audio/roguelike/layer_07.ogg",
+	"res://assets/audio/roguelike/layer_08.ogg",
 ]
 
 const HORROR_LAYERS := [
-	"res://assets/audio/horror/layer_01.ogg",  # Дроун/суббас
-	"res://assets/audio/horror/layer_02.ogg",  # Дисторшн
-	"res://assets/audio/horror/layer_03.ogg",  # Шёпот
-	"res://assets/audio/horror/layer_04.ogg",  # Скрипы/шумы
-	"res://assets/audio/horror/layer_05.ogg",  # Инвертированная мелодия
-	"res://assets/audio/horror/layer_06.ogg",  # Пульс
+	"res://assets/audio/horror/layer_01.ogg",
+	"res://assets/audio/horror/layer_02.ogg",
+	"res://assets/audio/horror/layer_03.ogg",
+	"res://assets/audio/horror/layer_04.ogg",
+	"res://assets/audio/horror/layer_05.ogg",
+	"res://assets/audio/horror/layer_06.ogg",
 ]
 
-# Индексы ключевых слоёв
 const IDX_BASS := 0
 const IDX_PERC := 1
 const IDX_ATMO := 4
@@ -40,7 +39,6 @@ var _target_volumes: Array[float] = []
 var _current_mode: MusicMode = MusicMode.ROGUELIKE
 var _current_state: GameState = GameState.CALM
 var _mix_timer := 0.0
-var _mix_interval := 0.0
 var _active := false
 
 func _ready() -> void:
@@ -100,7 +98,6 @@ func _apply_state_mix() -> void:
 	var tween := create_tween()
 	tween.set_parallel(true)
 	if _current_state == GameState.COMBAT:
-		# Бой: бас и перкуссия громче, атмосфера тише
 		if IDX_BASS < _layers.size():
 			tween.tween_property(_layers[IDX_BASS], "volume_db", linear_to_db(1.0), 1.0)
 		if IDX_PERC < _layers.size():
@@ -108,7 +105,6 @@ func _apply_state_mix() -> void:
 		if IDX_ATMO < _layers.size():
 			tween.tween_property(_layers[IDX_ATMO], "volume_db", linear_to_db(0.2), 1.0)
 	else:
-		# Покой: атмосфера и тепло громче, перкуссия тише
 		if IDX_PERC < _layers.size():
 			tween.tween_property(_layers[IDX_PERC], "volume_db", linear_to_db(0.3), 2.0)
 		if IDX_ATMO < _layers.size():
@@ -124,7 +120,6 @@ func _randomize_one_layer() -> void:
 	if _layers.is_empty():
 		return
 	var idx := randi() % _layers.size()
-	# Не трогаем ключевые слои в случайном микшировании во время боя
 	if _current_state == GameState.COMBAT and (idx == IDX_BASS or idx == IDX_PERC):
 		return
 	var target_vol := randf_range(0.4, 1.0)
@@ -133,8 +128,7 @@ func _randomize_one_layer() -> void:
 	tween.tween_property(_layers[idx], "volume_db", linear_to_db(target_vol), duration)
 
 func _reset_mix_timer() -> void:
-	_mix_interval = randf_range(8.0, 16.0)
-	_mix_timer = _mix_interval
+	_mix_timer = randf_range(8.0, 16.0)
 
 # ============================================================
 # Загрузка слоёв
@@ -143,21 +137,30 @@ func _reset_mix_timer() -> void:
 func _load_layers(paths: Array) -> void:
 	_layers.clear()
 	_target_volumes.clear()
+
+	var world_seed: int = SaveManager.get_value("world_seed", 0)
+
 	for i in paths.size():
 		var player := AudioStreamPlayer.new()
 		player.bus = "Music"
+
 		if ResourceLoader.exists(paths[i]):
-			player.stream = load(paths[i])
-			player.stream.loop = true
-		# Начальная громкость из seed'а (процедурно)
+			# FIX: явное приведение типа для установки loop
+			# AudioStream (базовый класс) не имеет свойства loop
+			var stream := load(paths[i])
+			if stream is AudioStreamOggVorbis:
+				(stream as AudioStreamOggVorbis).loop = true
+			player.stream = stream
+
 		var rng := RandomNumberGenerator.new()
-		rng.seed = SaveManager.get_value("world_seed", 0) ^ (i * 0xFF)
+		rng.seed = world_seed ^ (i * 0xFF)
 		var init_vol := rng.randf_range(0.4, 1.0)
 		player.volume_db = linear_to_db(init_vol)
 		add_child(player)
 		_layers.append(player)
 		_target_volumes.append(init_vol)
-		if ResourceLoader.exists(paths[i]):
+
+		if player.stream != null:
 			player.play()
 
 func _stop_all() -> void:

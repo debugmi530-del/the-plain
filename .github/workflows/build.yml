@@ -8,6 +8,7 @@ on:
 env:
   GODOT_VERSION: "4.4"
   EXPORT_NAME: "the-plain"
+  KEYSTORE_PATH: "/home/runner/release.keystore"
 
 jobs:
   build-android:
@@ -33,7 +34,8 @@ jobs:
 
       - name: Install Godot ${{ env.GODOT_VERSION }}
         run: |
-          wget -q "https://github.com/godotengine/godot/releases/download/${{ env.GODOT_VERSION }}-stable/Godot_v${{ env.GODOT_VERSION }}-stable_linux.x86_64.zip" -O /tmp/godot.zip
+          wget -q "https://github.com/godotengine/godot/releases/download/${{ env.GODOT_VERSION }}-stable/Godot_v${{ env.GODOT_VERSION }}-stable_linux.x86_64.zip" \
+            -O /tmp/godot.zip
           unzip -q /tmp/godot.zip -d /tmp/godot
           sudo mv "/tmp/godot/Godot_v${{ env.GODOT_VERSION }}-stable_linux.x86_64" /usr/local/bin/godot
           sudo chmod +x /usr/local/bin/godot
@@ -43,41 +45,49 @@ jobs:
         run: |
           TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/${{ env.GODOT_VERSION }}.stable"
           mkdir -p "$TEMPLATE_DIR"
-          wget -q "https://github.com/godotengine/godot/releases/download/${{ env.GODOT_VERSION }}-stable/Godot_v${{ env.GODOT_VERSION }}-stable_export_templates.tpz" -O /tmp/templates.tpz
+          wget -q "https://github.com/godotengine/godot/releases/download/${{ env.GODOT_VERSION }}-stable/Godot_v${{ env.GODOT_VERSION }}-stable_export_templates.tpz" \
+            -O /tmp/templates.tpz
           unzip -q /tmp/templates.tpz -d /tmp/godot_templates
           mv /tmp/godot_templates/templates/* "$TEMPLATE_DIR/"
 
-      - name: Setup Godot Android export
+      # FIX: убраны лишние пробелы в heredoc; путь к SDK задаётся без $HOME-переменных
+      - name: Setup Godot Android editor settings
         run: |
           mkdir -p "$HOME/.config/godot"
-          cat > "$HOME/.config/godot/editor_settings-4.tres" << 'EOF'
+          ANDROID_SDK_PATH="$(realpath "$ANDROID_SDK_ROOT")"
+          cat > "$HOME/.config/godot/editor_settings-4.tres" << EOF
           [gd_resource type="EditorSettings" format=3]
           [resource]
-          export/android/android_sdk_path = "/usr/local/lib/android/sdk"
+          export/android/android_sdk_path = "$ANDROID_SDK_PATH"
           EOF
 
-      - name: Setup keystore
+      # FIX: шаг keystore только если секрет задан; путь прописан как абсолютный
+      - name: Setup keystore (release)
+        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$HOME/release.keystore"
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "${{ env.KEYSTORE_PATH }}"
+          # Обновляем путь к keystore в export_presets.cfg
+          sed -i "s|keystore/release=.*|keystore/release=\"${{ env.KEYSTORE_PATH }}\"|g" export_presets.cfg
+          sed -i "s|keystore/release_user=.*|keystore/release_user=\"${{ secrets.KEY_ALIAS }}\"|g" export_presets.cfg
+          sed -i "s|keystore/release_password=.*|keystore/release_password=\"${{ secrets.KEY_PASSWORD }}\"|g" export_presets.cfg
 
       - name: Import project
         run: |
-          cd ${{ github.workspace }}
           timeout 120 godot --headless --import 2>&1 || true
 
-      - name: Build APK (debug - no keystore required)
+      - name: Build APK (debug)
         if: ${{ secrets.KEYSTORE_BASE64 == '' }}
         run: |
           mkdir -p build
-          cd ${{ github.workspace }}
           godot --headless --export-debug "Android" "build/${{ env.EXPORT_NAME }}-debug.apk" 2>&1
+          echo "BUILD_FILE=build/${{ env.EXPORT_NAME }}-debug.apk" >> $GITHUB_ENV
 
-      - name: Build APK (release - signed)
+      - name: Build APK (release, signed)
         if: ${{ secrets.KEYSTORE_BASE64 != '' }}
         run: |
           mkdir -p build
-          cd ${{ github.workspace }}
           godot --headless --export-release "Android" "build/${{ env.EXPORT_NAME }}.apk" 2>&1
+          echo "BUILD_FILE=build/${{ env.EXPORT_NAME }}.apk" >> $GITHUB_ENV
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -93,7 +103,8 @@ jobs:
           tag_name: "build-${{ github.run_number }}"
           name: "Build #${{ github.run_number }}"
           body: |
-            Автоматическая сборка из ветки main
+            Автоматическая сборка из ветки `main`
             Коммит: ${{ github.sha }}
+            Подписан: ${{ secrets.KEYSTORE_BASE64 != '' && 'да' || 'нет (debug)' }}
           files: build/*.apk
           generate_release_notes: false

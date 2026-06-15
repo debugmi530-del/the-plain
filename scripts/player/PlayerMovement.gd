@@ -5,10 +5,11 @@ extends CharacterBody3D
 # Свайп-камера (FPS), виртуальный джойстик, спринт
 # ============================================================
 
-@onready var _camera_pivot: Node3D  = $CameraPivot
-@onready var _camera: Camera3D      = $CameraPivot/Camera3D
-@onready var _stats: Node           = $PlayerStats
-@onready var _vjoy_area: Control    = $HUDLayer/VJoyArea
+@onready var _camera_pivot: Node3D = $CameraPivot
+@onready var _camera: Camera3D     = $CameraPivot/Camera3D
+@onready var _stats: Node          = $PlayerStats
+
+# FIX: убрана ссылка $HUDLayer/VJoyArea — узел не существует в Player.tscn
 
 const GRAVITY := 9.8
 const SPRINT_MULTIPLIER := 1.7
@@ -23,7 +24,7 @@ var _is_sprinting := false
 var _in_water := false
 var _in_swamp := false
 
-# Виртуальный джойстик
+# Виртуальный джойстик (реализован через raw touch events)
 var _joy_active := false
 var _joy_start: Vector2 = Vector2.ZERO
 var _joy_delta: Vector2 = Vector2.ZERO
@@ -35,8 +36,9 @@ var _cam_last_pos: Vector2 = Vector2.ZERO
 
 func _ready() -> void:
 	_load_sensitivity()
-	_stats.stats_changed.connect(_on_stats_changed)
-	_stats.died.connect(_on_died)
+	if _stats:
+		if _stats.has_signal("died"):
+			_stats.died.connect(_on_died)
 
 func _physics_process(delta: float) -> void:
 	_process_gravity(delta)
@@ -55,7 +57,6 @@ func _process_gravity(delta: float) -> void:
 		velocity.y -= GRAVITY * delta
 
 func _process_movement(delta: float) -> void:
-	# Направление из виртуального джойстика
 	var input_dir := _joy_delta.normalized() if _joy_active else Vector2.ZERO
 	var forward := -_camera.global_transform.basis.z
 	var right   := _camera.global_transform.basis.x
@@ -64,13 +65,15 @@ func _process_movement(delta: float) -> void:
 	forward   = forward.normalized()
 	right     = right.normalized()
 
-	var move_dir := (forward * (-input_dir.y) + right * input_dir.x)
+	var move_dir := forward * (-input_dir.y) + right * input_dir.x
 
-	var base_speed := _stats.get_speed()
+	var base_speed := 5.0
+	if _stats and _stats.has_method("get_speed"):
+		base_speed = _stats.get_speed()
 
 	# Спринт (у земли + есть выносливость)
 	if _is_sprinting and is_on_floor() and move_dir.length() > 0.1:
-		if _stats.use_stamina_sprint(delta):
+		if _stats and _stats.has_method("use_stamina_sprint") and _stats.use_stamina_sprint(delta):
 			base_speed *= SPRINT_MULTIPLIER
 		else:
 			_is_sprinting = false
@@ -102,13 +105,11 @@ func _handle_touch(event: InputEventScreenTouch) -> void:
 	var screen_w := float(get_viewport().get_visible_rect().size.x)
 
 	if event.pressed:
-		# Левая половина → джойстик
 		if event.position.x < screen_w * 0.5 and _joy_touch_index == -1:
 			_joy_touch_index = event.index
 			_joy_start  = event.position
 			_joy_delta  = Vector2.ZERO
 			_joy_active = true
-		# Правая половина → камера
 		elif event.position.x >= screen_w * 0.5 and _cam_touch_index == -1:
 			_cam_touch_index = event.index
 			_cam_last_pos = event.position
@@ -122,15 +123,20 @@ func _handle_touch(event: InputEventScreenTouch) -> void:
 
 func _handle_drag(event: InputEventScreenDrag) -> void:
 	if event.index == _joy_touch_index:
-		_joy_delta = (event.position - _joy_start).normalized()
+		var raw := event.position - _joy_start
+		# Нормализуем только если за пределами мёртвой зоны
+		if raw.length() > 10.0:
+			_joy_delta = raw.normalized()
+		else:
+			_joy_delta = Vector2.ZERO
 	elif event.index == _cam_touch_index:
-		var delta := event.position - _cam_last_pos
+		var drag_delta := event.position - _cam_last_pos
 		_cam_last_pos = event.position
-		_rotate_camera(delta)
+		_rotate_camera(drag_delta)
 
-func _rotate_camera(delta: Vector2) -> void:
-	_camera_rotation_y -= delta.x * _camera_sensitivity * 0.002
-	_camera_rotation_x -= delta.y * _camera_sensitivity * 0.002
+func _rotate_camera(drag_delta: Vector2) -> void:
+	_camera_rotation_y -= drag_delta.x * _camera_sensitivity * 0.002
+	_camera_rotation_x -= drag_delta.y * _camera_sensitivity * 0.002
 	_camera_rotation_x  = clamp(_camera_rotation_x, deg_to_rad(-80.0), deg_to_rad(80.0))
 	rotation.y          = _camera_rotation_y
 	_camera_pivot.rotation.x = _camera_rotation_x
@@ -139,20 +145,13 @@ func _rotate_camera(delta: Vector2) -> void:
 # Зоны воды и болота
 # ============================================================
 
-func enter_water() -> void:
-	_in_water = true
-
-func exit_water() -> void:
-	_in_water = false
-
-func enter_swamp() -> void:
-	_in_swamp = true
-
-func exit_swamp() -> void:
-	_in_swamp = false
+func enter_water() -> void:  _in_water = true
+func exit_water()  -> void:  _in_water = false
+func enter_swamp() -> void:  _in_swamp = true
+func exit_swamp()  -> void:  _in_swamp = false
 
 # ============================================================
-# Настройки
+# Настройки камеры
 # ============================================================
 
 func _load_sensitivity() -> void:
@@ -164,21 +163,15 @@ func set_sensitivity(value: float) -> void:
 	get_node("/root/SaveManager").set_value("camera_sensitivity", _camera_sensitivity)
 
 # ============================================================
-# Спринт (двойное касание по джойстику — Этап 4)
+# Спринт (вызывается из UI кнопки спринта — Этап 4)
 # ============================================================
 
-func start_sprint() -> void:
-	_is_sprinting = true
-
-func stop_sprint() -> void:
-	_is_sprinting = false
+func start_sprint() -> void:  _is_sprinting = true
+func stop_sprint()  -> void:  _is_sprinting = false
 
 # ============================================================
-# Сигналы Stats
+# Смерть
 # ============================================================
-
-func _on_stats_changed(_hp, _max_hp, _st, _max_st, _xp, _level) -> void:
-	pass  # HUD обновляется через WorldRoguelike
 
 func _on_died() -> void:
 	set_physics_process(false)

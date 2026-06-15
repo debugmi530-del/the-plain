@@ -21,12 +21,11 @@ var _fourth_wall: Node
 var _device_info: Node
 
 func _ready() -> void:
-	_save_manager    = get_node("/root/SaveManager")
-	_horror_trigger  = get_node("/root/HorrorTrigger")
-	_fourth_wall     = get_node("/root/FourthWall")
-	_device_info     = get_node("/root/DeviceInfo")
+	_save_manager   = get_node("/root/SaveManager")
+	_horror_trigger = get_node("/root/HorrorTrigger")
+	_fourth_wall    = get_node("/root/FourthWall")
+	_device_info    = get_node("/root/DeviceInfo")
 
-	# Подписываемся на глитч-сигнал
 	_fourth_wall.glitch_triggered.connect(_on_glitch)
 
 	var hero_name := _save_manager.get_hero_name()
@@ -37,13 +36,11 @@ func _ready() -> void:
 	else:
 		_show_continue(hero_name, stage)
 
-	# Хоррор-модификации меню (стадия 2+)
 	if stage >= 2:
 		_apply_horror_tint()
 		_fourth_wall.activate()
 		_fourth_wall.trigger_contextual_glitches()
 
-	# Планируем уведомление, если кнопку жали
 	get_node("/root/NotificationManager").check_pending_notification()
 
 # ============================================================
@@ -72,11 +69,14 @@ func _show_continue(hero_name: String, stage: int) -> void:
 # ============================================================
 
 func _on_btn_start_pressed() -> void:
-	var name := _input_name.text.strip_edges()
-	if name.is_empty() or name.length() > 20:
+	var name_text := _input_name.text.strip_edges()
+	if name_text.is_empty() or name_text.length() > 20:
 		_input_name.modulate = Color.RED
+		# FIX: возвращаем цвет через tween
+		var tween := create_tween()
+		tween.tween_property(_input_name, "modulate", Color.WHITE, 1.0)
 		return
-	_save_manager.set_hero_name(name)
+	_save_manager.set_hero_name(name_text)
 	get_node("/root/Main").trigger_roguelike_stage()
 
 func _on_btn_continue_pressed() -> void:
@@ -91,11 +91,10 @@ func _on_btn_donotpress_pressed() -> void:
 	_horror_trigger.trigger_do_not_press()
 
 # ============================================================
-# Хоррор-модификации
+# Хоррор-модификации (минимальный красный тинт)
 # ============================================================
 
 func _apply_horror_tint() -> void:
-	# Минимальный красный оттенок — игрок не должен замечать сразу
 	var tween := create_tween()
 	tween.tween_property(
 		$CanvasLayer/BgRect,
@@ -110,10 +109,11 @@ func _apply_horror_tint() -> void:
 
 func _on_glitch(text: String) -> void:
 	_glitch_label.text = text
+	_glitch_label.modulate.a = 1.0
 	_glitch_label.visible = true
 	var tween := create_tween()
 	tween.tween_property(_glitch_label, "modulate:a", 0.0, randf_range(2.0, 4.0))
 	tween.tween_callback(_glitch_label.hide)
 
-func show_center_text(text: String, duration: float) -> void:
+func show_center_text(text: String, _duration: float) -> void:
 	_on_glitch(text)

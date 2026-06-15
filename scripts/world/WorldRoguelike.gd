@@ -6,12 +6,11 @@ extends Node3D
 # Все механики Этапа 2 — здесь точки расширения
 # ============================================================
 
-add_to_group("world")
-
 const CHUNK_SIZE  := 64
 const VIEW_RADIUS := 3   # 7×7 видимых чанков (448×448м видимости)
 
 var _player: Node3D = null
+var _player_stats: Node = null
 var _hud: Node = null
 var _save_manager: Node
 var _audio: Node
@@ -20,8 +19,12 @@ var _device_info: Node
 # Чанки: ключ Vector2i → Node3D
 var _loaded_chunks: Dictionary = {}
 var _world_seed: int = 0
+var _autosave_timer := 0.0
 
 func _ready() -> void:
+	# FIX: add_to_group должен вызываться в _ready(), не на уровне класса
+	add_to_group("world")
+
 	_save_manager = get_node("/root/SaveManager")
 	_audio        = get_node("/root/AudioLayerManager")
 	_device_info  = get_node("/root/DeviceInfo")
@@ -40,15 +43,19 @@ func _ready() -> void:
 
 	# Восстанавливаем позицию
 	var px: float = _save_manager.get_value("player_pos_x", 0.0)
-	var py: float = _save_manager.get_value("player_pos_y", 0.5)
+	var py: float = _save_manager.get_value("player_pos_y", 1.0)
 	var pz: float = _save_manager.get_value("player_pos_z", 0.0)
 	_player.global_position = Vector3(px, py, pz)
 
-	# Соединяем сигналы игрока с HUD
-	if _player.has_signal("stats_changed"):
-		_player.stats_changed.connect(_on_player_stats_changed)
-	if _player.has_signal("died"):
-		_player.died.connect(_on_player_died)
+	# FIX: сигналы подключаем к PlayerStats (дочерний узел), а не к корню
+	_player_stats = _player.get_node_or_null("PlayerStats")
+	if _player_stats:
+		if _player_stats.has_signal("stats_changed"):
+			_player_stats.stats_changed.connect(_on_player_stats_changed)
+		if _player_stats.has_signal("died"):
+			_player_stats.died.connect(_on_player_died)
+	else:
+		push_error("WorldRoguelike: PlayerStats не найден у игрока")
 
 	# Начинаем музыку
 	_audio.start_roguelike()
@@ -56,13 +63,16 @@ func _ready() -> void:
 	# Инициализируем начальные чанки
 	_update_chunks()
 
-func _process(_delta: float) -> void:
-	if _player:
-		_update_chunks()
-		_auto_save_check()
+var _last_player_chunk := Vector2i(999, 999)
 
-	# Ночные/батарейные модификаторы (стадия 2 не активна но данные копятся)
-	_apply_env_modifiers()
+func _process(delta: float) -> void:
+	if _player:
+		# FIX: обновляем чанки только при смене чанка игрока
+		var current_chunk := _world_to_chunk(_player.global_position)
+		if current_chunk != _last_player_chunk:
+			_last_player_chunk = current_chunk
+			_update_chunks()
+		_auto_save_check(delta)
 
 # ============================================================
 # Чанк-система (заглушка, полная реализация в Этапе 2)
@@ -73,7 +83,6 @@ func _update_chunks() -> void:
 		return
 	var player_chunk := _world_to_chunk(_player.global_position)
 
-	# Собираем список нужных чанков
 	var needed: Dictionary = {}
 	for dx in range(-VIEW_RADIUS, VIEW_RADIUS + 1):
 		for dz in range(-VIEW_RADIUS, VIEW_RADIUS + 1):
@@ -91,7 +100,6 @@ func _update_chunks() -> void:
 			_load_chunk(coord)
 
 func _load_chunk(coord: Vector2i) -> void:
-	# Заглушка: создаём плоскую плоскость с процедурным цветом
 	var rng := RandomNumberGenerator.new()
 	rng.seed = _world_seed ^ (coord.x * 7919 + coord.y * 4591)
 	var mesh := MeshInstance3D.new()
@@ -105,7 +113,20 @@ func _load_chunk(coord: Vector2i) -> void:
 		rng.randf_range(0.1, 0.3)
 	)
 	mesh.material_override = mat
-	mesh.position = Vector3(coord.x * CHUNK_SIZE, 0.0, coord.y * CHUNK_SIZE)
+	# Центрируем чанк
+	mesh.position = Vector3(
+		coord.x * CHUNK_SIZE + CHUNK_SIZE * 0.5,
+		0.0,
+		coord.y * CHUNK_SIZE + CHUNK_SIZE * 0.5
+	)
+	# Добавляем коллизию к плоскости
+	var static_body := StaticBody3D.new()
+	var collision := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(CHUNK_SIZE, 0.1, CHUNK_SIZE)
+	collision.shape = box
+	static_body.add_child(collision)
+	mesh.add_child(static_body)
 	add_child(mesh)
 	_loaded_chunks[coord] = mesh
 
@@ -132,13 +153,13 @@ func spawn_final_door() -> void:
 # Автосохранение каждые 60 секунд
 # ============================================================
 
-var _autosave_timer := 0.0
-
-func _auto_save_check() -> void:
-	_autosave_timer += get_process_delta_time()
+func _auto_save_check(delta: float) -> void:
+	_autosave_timer += delta
 	if _autosave_timer >= 60.0:
 		_autosave_timer = 0.0
 		_save_position()
+		if _player_stats:
+			_player_stats.save_to_save()
 		_save_manager.save_game()
 
 func _save_position() -> void:
@@ -148,14 +169,6 @@ func _save_position() -> void:
 	_save_manager.set_value("player_pos_x", pos.x)
 	_save_manager.set_value("player_pos_y", pos.y)
 	_save_manager.set_value("player_pos_z", pos.z)
-
-# ============================================================
-# Модификаторы окружения
-# ============================================================
-
-func _apply_env_modifiers() -> void:
-	# Применяем ночь/батарею только если стадия позволяет
-	pass
 
 # ============================================================
 # Сигналы игрока

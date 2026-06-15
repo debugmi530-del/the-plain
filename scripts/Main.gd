@@ -15,15 +15,10 @@ const SCENE_FINAL      := "res://scenes/world/WorldFinal.tscn"
 var _current_scene: Node = null
 var _save_manager: Node = null
 var _device_info: Node = null
-var _fourth_wall: Node = null
-var _notification_manager: Node = null
 
 func _ready() -> void:
-	# Получаем ссылки на синглтоны (добавлены в Project Settings > Autoload)
-	_save_manager       = get_node("/root/SaveManager")
-	_device_info        = get_node("/root/DeviceInfo")
-	_fourth_wall        = get_node("/root/FourthWall")
-	_notification_manager = get_node("/root/NotificationManager")
+	_save_manager = get_node("/root/SaveManager")
+	_device_info  = get_node("/root/DeviceInfo")
 
 	# Блокируем кнопку «Назад» на Android
 	get_tree().set_auto_accept_quit(false)
@@ -32,7 +27,7 @@ func _ready() -> void:
 	var save_data := _save_manager.load_or_init()
 	_save_manager.start_session()
 
-	# Root detection (простая GDScript-проверка)
+	# Root detection (GDScript-проверка)
 	_device_info.check_root_simple()
 
 	# Определяем точку входа
@@ -49,15 +44,11 @@ func _notification(what: int) -> void:
 			var hud := get_tree().get_first_node_in_group("hud")
 			if hud and hud.has_method("toggle_pause"):
 				hud.toggle_pause()
-
-		NOTIFICATION_WM_CLOSE_REQUEST, \
-		NOTIFICATION_APPLICATION_PAUSED:
+		NOTIFICATION_WM_CLOSE_REQUEST, NOTIFICATION_APPLICATION_PAUSED:
 			_save_manager.emergency_save()
 			_save_manager.stop_session()
-
 		NOTIFICATION_APPLICATION_RESUMED:
 			_save_manager.start_session()
-
 		NOTIFICATION_CRASH:
 			_save_manager.emergency_save()
 
@@ -78,6 +69,7 @@ func _load_stage(stage: int) -> void:
 func _transition_to(scene_path: String) -> void:
 	if _current_scene:
 		_current_scene.queue_free()
+		_current_scene = null
 	var packed := ResourceLoader.load(scene_path) as PackedScene
 	if not packed:
 		push_error("Main: не удалось загрузить сцену: " + scene_path)
@@ -91,6 +83,10 @@ func _transition_to(scene_path: String) -> void:
 
 func go_to_main_menu() -> void:
 	_go_to_main_menu()
+
+## Загружает сохранённую стадию (вызывается из MainMenu при «Продолжить» / «Начать»)
+func trigger_roguelike_stage() -> void:
+	_load_stage(_save_manager.get_stage())
 
 func trigger_horror_stage() -> void:
 	_save_manager.set_stage(Stage.HORROR)
