@@ -13,6 +13,8 @@ env:
 jobs:
   build-android:
     runs-on: ubuntu-latest
+    env:
+      HAS_KEYSTORE: ${{ secrets.KEYSTORE_BASE64 != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -50,7 +52,6 @@ jobs:
           unzip -q /tmp/templates.tpz -d /tmp/godot_templates
           mv /tmp/godot_templates/templates/* "$TEMPLATE_DIR/"
 
-      # FIX: убраны лишние пробелы в heredoc; путь к SDK задаётся без $HOME-переменных
       - name: Setup Godot Android editor settings
         run: |
           mkdir -p "$HOME/.config/godot"
@@ -61,12 +62,10 @@ jobs:
           export/android/android_sdk_path = "$ANDROID_SDK_PATH"
           EOF
 
-      # FIX: шаг keystore только если секрет задан; путь прописан как абсолютный
       - name: Setup keystore (release)
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        if: env.HAS_KEYSTORE == 'true'
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "${{ env.KEYSTORE_PATH }}"
-          # Обновляем путь к keystore в export_presets.cfg
           sed -i "s|keystore/release=.*|keystore/release=\"${{ env.KEYSTORE_PATH }}\"|g" export_presets.cfg
           sed -i "s|keystore/release_user=.*|keystore/release_user=\"${{ secrets.KEY_ALIAS }}\"|g" export_presets.cfg
           sed -i "s|keystore/release_password=.*|keystore/release_password=\"${{ secrets.KEY_PASSWORD }}\"|g" export_presets.cfg
@@ -76,14 +75,14 @@ jobs:
           timeout 120 godot --headless --import 2>&1 || true
 
       - name: Build APK (debug)
-        if: ${{ secrets.KEYSTORE_BASE64 == '' }}
+        if: env.HAS_KEYSTORE == 'false'
         run: |
           mkdir -p build
           godot --headless --export-debug "Android" "build/${{ env.EXPORT_NAME }}-debug.apk" 2>&1
           echo "BUILD_FILE=build/${{ env.EXPORT_NAME }}-debug.apk" >> $GITHUB_ENV
 
       - name: Build APK (release, signed)
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        if: env.HAS_KEYSTORE == 'true'
         run: |
           mkdir -p build
           godot --headless --export-release "Android" "build/${{ env.EXPORT_NAME }}.apk" 2>&1
@@ -105,6 +104,6 @@ jobs:
           body: |
             Автоматическая сборка из ветки `main`
             Коммит: ${{ github.sha }}
-            Подписан: ${{ secrets.KEYSTORE_BASE64 != '' && 'да' || 'нет (debug)' }}
+            Подписан: ${{ env.HAS_KEYSTORE == 'true' && 'да' || 'нет (debug)' }}
           files: build/*.apk
           generate_release_notes: false
