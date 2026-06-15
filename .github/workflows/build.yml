@@ -70,6 +70,13 @@ jobs:
           sed -i "s|keystore/release_user=.*|keystore/release_user=\"${{ secrets.KEY_ALIAS }}\"|g" export_presets.cfg
           sed -i "s|keystore/release_password=.*|keystore/release_password=\"${{ secrets.KEY_PASSWORD }}\"|g" export_presets.cfg
 
+      - name: Clear keystore settings (debug build)
+        if: env.HAS_KEYSTORE == 'false'
+        run: |
+          sed -i 's|keystore/release=.*|keystore/release=""|g' export_presets.cfg
+          sed -i 's|keystore/release_user=.*|keystore/release_user=""|g' export_presets.cfg
+          sed -i 's|keystore/release_password=.*|keystore/release_password=""|g' export_presets.cfg
+
       - name: Import project
         run: |
           timeout 120 godot --headless --import 2>&1 || true
