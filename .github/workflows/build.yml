@@ -70,12 +70,28 @@ jobs:
           sed -i "s|keystore/release_user=.*|keystore/release_user=\"${{ secrets.KEY_ALIAS }}\"|g" export_presets.cfg
           sed -i "s|keystore/release_password=.*|keystore/release_password=\"${{ secrets.KEY_PASSWORD }}\"|g" export_presets.cfg
 
-      - name: Clear keystore settings (debug build)
+      - name: Setup keystore (debug)
         if: env.HAS_KEYSTORE == 'false'
         run: |
+          # Clear release keystore fields so Godot does not complain about partial config
           sed -i 's|keystore/release=.*|keystore/release=""|g' export_presets.cfg
           sed -i 's|keystore/release_user=.*|keystore/release_user=""|g' export_presets.cfg
           sed -i 's|keystore/release_password=.*|keystore/release_password=""|g' export_presets.cfg
+          # Generate a debug keystore so Godot can sign the debug APK
+          mkdir -p "$HOME/.android"
+          keytool -genkey -v \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US" 2>/dev/null || true
+          # Set the expanded debug keystore path (replaces literal $HOME in cfg)
+          sed -i "s|keystore/debug=.*|keystore/debug=\"$HOME/.android/debug.keystore\"|g" export_presets.cfg
+          sed -i "s|keystore/debug_user=.*|keystore/debug_user=\"androiddebugkey\"|g" export_presets.cfg
+          sed -i "s|keystore/debug_password=.*|keystore/debug_password=\"android\"|g" export_presets.cfg
+          echo "=== export_presets.cfg keystore section ==="
+          grep "keystore/" export_presets.cfg
 
       - name: Import project
         run: |
